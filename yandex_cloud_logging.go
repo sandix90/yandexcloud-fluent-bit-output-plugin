@@ -2,6 +2,7 @@ package main
 
 import (
 	"C"
+	"fmt"
 	fluentbit "github.com/fluent/fluent-bit-go/output"
 	log "github.com/sirupsen/logrus"
 	"time"
@@ -40,7 +41,10 @@ func addPluginInstance(ctx unsafe.Pointer) error {
 		return err
 	}
 
-	logSender := plugin.NewYandexCloudHTTPClient(config)
+	logSender, err := plugin.NewGRPCLogSender(config)
+	if err != nil {
+		return fmt.Errorf("log sender configuration error")
+	}
 	pluginInstance := plugin.NewYandexCloudOutputPlugin(config, logSender)
 
 	fluentbit.FLBPluginSetContext(ctx, pluginID)

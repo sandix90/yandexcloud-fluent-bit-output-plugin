@@ -29,7 +29,7 @@ func NewOutputPluginConfig(ctx unsafe.Pointer, pluginID int) OutputPluginConfig 
 
 	config.EndpointUrl = fluentbit.FLBPluginConfigKey(ctx, "endpoint_url")
 	if config.EndpointUrl == "" {
-		config.EndpointUrl = "https://logging.api.cloud.yandex.net/logging/v1/write"
+		config.EndpointUrl = "ingester.logging.yandexcloud.net:443"
 	}
 	log.Infof("[yandexcloud %d] plugin parameter endpoint_url = `%s`", pluginID, config.EndpointUrl)
 
@@ -59,7 +59,6 @@ func NewOutputPluginConfig(ctx unsafe.Pointer, pluginID int) OutputPluginConfig 
 		config.LogLevelKey = "level"
 	}
 	log.Infof("[yandexcloud %d] plugin parameter log_level_key = `%s`", pluginID, config.LogLevelKey)
-
 
 	return config
 }

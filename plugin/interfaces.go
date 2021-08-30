@@ -1,6 +1,9 @@
 package plugin
 
-import "yandex_logging/plugin/dto"
+import (
+	"time"
+	"yandex_logging/plugin/dto"
+)
 
 // LogSender is used to send Event list to external system
 type LogSender interface {
@@ -25,4 +28,11 @@ type OutputPlugin interface {
 
 	// GetPluginInstanceID return ID of the plugin instance
 	GetPluginInstanceID() int
+}
+
+type requestHandler func(reqModel *dto.YCLogRecordRequestModel) error
+
+type authToken struct {
+	token     string
+	expiresAt time.Time
 }

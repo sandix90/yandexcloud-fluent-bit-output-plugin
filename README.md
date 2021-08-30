@@ -51,4 +51,10 @@ If you want to have your configs copied into the container, please uncomment bot
 * `log_level_key` - `(optional)` `string` name of the level log field. `default` - `level`
 
 ### Note
-Either folder_id or log_group_id should have been created and properly configured. 
+Either folder_id or log_group_id should have been created and properly configured.
+
+
+How to generate protoc in case you need it:
+```shell
+protoc -I ./third_party/googleapis -I . --go_out=paths=source_relative:. yandex/cloud/logging/v1/*.proto 
+```

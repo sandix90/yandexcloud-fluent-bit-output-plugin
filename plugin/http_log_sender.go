@@ -24,15 +24,9 @@ var ps256WithSaltLengthEqualsHash = &jwt.SigningMethodRSAPSS{
 	},
 }
 
-type authToken struct {
-	token     string
-	expiresAt time.Time
-}
-type requestHandler func(reqModel *dto.YCLogRecordRequestModel) error
-
 type yandexCloudHTTPClient struct {
-	requestTimeout     time.Duration
-	tokenLifetime      time.Duration
+	requestTimeout   time.Duration
+	tokenLifetime    time.Duration
 	authToken        authToken
 	doRequestHandler requestHandler
 	config           OutputPluginConfig
@@ -40,9 +34,9 @@ type yandexCloudHTTPClient struct {
 
 func NewYandexCloudHTTPClient(config OutputPluginConfig) *yandexCloudHTTPClient {
 	cl := &yandexCloudHTTPClient{
-		config: config,
-		requestTimeout:     time.Second * 5,
-		tokenLifetime:      time.Minute * 5,
+		config:         config,
+		requestTimeout: time.Second * 5,
+		tokenLifetime:  time.Minute * 5,
 	}
 	cl.doRequestHandler = cl.doRequest
 	return cl
@@ -52,23 +46,16 @@ func (y *yandexCloudHTTPClient) Send(events []*Event) error {
 
 	var entries []*dto.YCLogRecordEntry
 	for _, e := range events {
-		logKeyStr := "LEVEL_UNSPECIFIED"
+		logKey := "LEVEL_UNSPECIFIED"
 
-		logKey, err := e.LogLevelKey(e.Record, y.config.LogLevelKey)
+		logKey, err := e.PopLogLevel(e.Record, y.config.LogLevelKey)
 		if err != nil {
-			log.Errorln(errors.Wrapf(err, "ignoring log key"))
-		} else {
-			logKeyCasted, ok := logKey.(string)
-			if !ok {
-				log.Errorf("could cast log level key")
-				continue
-			}
-			logKeyStr = logKeyCasted
+			log.Errorln(err)
 		}
 
 		entries = append(entries, &dto.YCLogRecordEntry{
 			Timestamp:   e.Timestamp,
-			Level:       logKeyStr,
+			Level:       logKey,
 			JsonPayload: e.Record,
 		})
 	}
@@ -78,7 +65,7 @@ func (y *yandexCloudHTTPClient) Send(events []*Event) error {
 		Resource:    dto.YCLogRecordResource{ID: y.config.ResourceId, Type: y.config.ResourceType},
 		Entries:     entries,
 	}
-	if err := reqModel.Validate(); err != nil{
+	if err := reqModel.Validate(); err != nil {
 		return err
 	}
 
