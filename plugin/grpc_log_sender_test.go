@@ -2,15 +2,9 @@ package plugin
 
 import (
 	"context"
-	"github.com/golang/protobuf/ptypes/timestamp"
-	log "github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
-	"github.com/yandex-cloud/go-genproto/yandex/cloud/logging/v1"
-	ycsdk "github.com/yandex-cloud/go-sdk"
-	"github.com/yandex-cloud/go-sdk/iamkey"
-	"google.golang.org/grpc"
-	"google.golang.org/protobuf/types/known/structpb"
+	"os"
 	"testing"
 	"time"
 )
@@ -32,109 +26,45 @@ func (s *GRPCLogSenderTestSuite) SetupSuite() {
 		FolderId:           "test_folder_id",
 		ResourceId:         "test_resource_id",
 		ResourceType:       "test_resource_type",
-		KeyID:              "test_key_id",
-		ServiceAccountID:   "test_service_account_id",
-		PrivateKeyFilePath: "testdata/test_private.pem",
+		PrivateKeyFilePath: "testdata/private.json",
 		LogLevelKey:        "log_level",
 	}
 }
 
-func (s *GRPCLogSenderTestSuite) Test_FindLogLevelValue() {
-	logLevelVal := "TEST_DEBUG"
+func (s *GRPCLogSenderTestSuite) TestGrpcLogSender_Send() {
+	logLevelVal := "DEBUG"
 	eventCount := 5
 
-	/*log_group_id e23v58hh1tu4e536a4hl
-	resource_id pivoman_test_resource
-	resource_type test_logs_type
-	endpoint_url ingester.logging.yandexcloud.net
-	key_id ajejnbhfmf3rs29lj6vl
-	service_account_id ajeac8j4a6cilovgesoo
-	private_key_file_path /fluent-bit/etc/private.pem*/
-	s.config.LogGroupId = "e23v58hh1tu4e536a4hl"
-	s.config.EndpointUrl = "ingester.logging.yandexcloud.net:443"
-	//s.config.EndpointUrl = "api.cloud.yandex.net:443"
-	s.config.ResourceId = "pivoman_test_resource"
+	s.config.LogGroupId = os.Getenv("LOG_GROUP_ID")
+	s.config.ResourceId = "test_resource"
 	s.config.ResourceType = "test_logs_type"
-	s.config.KeyID = "ajejnbhfmf3rs29lj6vl"
-	s.config.ServiceAccountID = "ajeac8j4a6cilovgesoo"
-	s.config.PrivateKeyFilePath = "fluent-bit/etc/private.pem"
+	s.config.KeyID = os.Getenv("KEY_ID")
+	s.config.ServiceAccountID = os.Getenv("SERVICE_ACCOUNT_ID")
+	s.config.PrivateKeyFilePath = os.Getenv("PRIVATE_KEY_FILE_PATH")
+	s.config.FolderId = ""
 
-	ctx, cancelConn := context.WithTimeout(context.Background(), time.Second*55)
-	defer cancelConn()
-
-	//iamkey.ReadFromJSONBytes()
-	k, err := iamkey.ReadFromJSONFile("./testdata/service_account.json")
+	ctx, cancelFn := context.WithCancel(context.Background())
+	defer cancelFn()
+	sender, err := NewGRPCLogSender(ctx, s.config)
 	require.NoError(s.T(), err)
 
-	creds, err := ycsdk.ServiceAccountKey(k)
-	require.NoError(s.T(), err)
-
-	sdk, err := ycsdk.Build(ctx, ycsdk.Config{
-		Credentials: creds,
-	})
-	require.NoError(s.T(), err)
-
-	//t, err  := sdk.CreateIAMTokenForServiceAccount(ctx, "ajeac8j4a6cilovgesoo")
-	//require.NoError(s.T(), err)
-	//log.Infoln(t)
-
-	//list, err := sdk.Logging().LogGroup().List(ctx, nil, grpc.WithBlock())
-	//conn, err := grpc.DialContext(ctx, s.config.EndpointUrl, grpc.WithBlock(), grpc.WithInsecure())
-	//require.NoError(s.T(), err)
-	//defer conn.Close()
-	//c := logging.NewLogIngestionServiceClient(conn)
-	//
-	//client := &grpcLogSender{
-	//	config:          s.config,
-	//	tokenLifetime:   time.Second * 1,
-	//	requestTimeout:  time.Second * 5,
-	//	ingestionClient: c,
-	//}
-	//client.doRequestHandler = func(reqModel *dto.YCLogRecordRequestModel) error {
-	//	assert.Equal(s.T(), eventCount, len(reqModel.Entries))
-	//	assert.Equal(s.T(), logLevelVal, reqModel.Entries[0].Level)
-	//	return nil
-	//}
-
-	var events []*logging.IncomingLogEntry
+	var events []*Event
 	for i := 0; i < eventCount; i++ {
-		m := map[string]interface{}{
+		m := map[interface{}]interface{}{
 			s.config.LogLevelKey: logLevelVal,
-			"key1":               "value1",
-			"key2":               "value2",
-			"key3":               "value3",
+			"message":            "test_message",
+			"key1":               "new_value1",
+			"key2":               "new_value2",
+			"key3":               "new_value3",
 		}
-		newStruct, err := structpb.NewStruct(m)
-		require.NoError(s.T(), err)
-		//require.NoError(s.T(), err)
-
-		we := &logging.IncomingLogEntry{
-			Timestamp:   &timestamp.Timestamp{Seconds: time.Now().Unix()},
-			Level:       logging.LogLevel_INFO,
-			Message:     "test message",
-			JsonPayload: newStruct,
+		event := &Event{
+			Timestamp: time.Now(),
+			Record:    m,
+			Tag:       "tt",
 		}
-		events = append(events, we)
+		events = append(events, event)
 	}
 
-	wr := logging.WriteRequest{
-		Entries: events,
-	}
-	wr.Destination = &logging.Destination{Destination: &logging.Destination_FolderId{FolderId: "adf"}}
-	wResource := &logging.LogEntryResource{
-		Type: "test_type",
-		Id:   "test_id",
-	}
-	wr.SetResource(wResource)
-	wl := logging.ListLogGroupsRequest{
-		FolderId: "b1giufb956v3ib6oi107",
-	}
-
-	response, err := sdk.Logging().LogGroup().List(ctx, &wl, grpc.EmptyCallOption{})
-	//response, err := sdk.LogIngestion().LogIngestion().Write(ctx, &wr, grpc.EmptyCallOption{})
+	err = sender.Send(events)
 	require.NoError(s.T(), err)
-	log.Infoln(response)
-
-	//err = client.Send(events)
-	//assert.NoError(s.T(), err)
 }

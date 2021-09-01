@@ -19,7 +19,7 @@ type YCLogRecordResource struct {
 
 type YCLogRecordEntry struct {
 	Timestamp   time.Time                   `json:"timestamp" validate:"required"`
-	Level       string                      `json:"level" validate:"required"`
+	Level       string                      `json:"level"`
 	Message     string                      `json:"message"`
 	JsonPayload map[interface{}]interface{} `json:"jsonPayload" validate:"required"`
 }

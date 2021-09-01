@@ -1,4 +1,4 @@
-#Description
+# Description
 This plugin is used as an output fluent-bit plugin. The plugin should be compiled as a `.so` file with following command.
 ```shell
 go build -buildmode=c-shared -o out_yandexcloud.so yandex_cloud_logging.go
@@ -16,7 +16,7 @@ ENV GOOS=linux\
 
 COPY / /root
 
-RUN go mod download & make all
+RUN go mod download & make build
 
 FROM fluent/fluent-bit:1.4
 
@@ -58,3 +58,14 @@ How to generate protoc in case you need it:
 ```shell
 protoc -I ./third_party/googleapis -I . --go_out=paths=source_relative:. yandex/cloud/logging/v1/*.proto 
 ```
+
+# Tests
+To run test run following command:
+```shell
+make test
+```
+To test yandex logging send log the following envs must be specified
+* `LOG_GROUP_ID` `(string)` - log group id
+* `KEY_ID` `(string)` - key id 
+* `SERVICE_ACCOUNT_ID` `(string)` - service account id 
+* `PRIVATE_KEY_FILE_PATH` `(string)` - file path which contains private key  

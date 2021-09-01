@@ -36,7 +36,7 @@ func (e *Event) PopLogLevel(record map[interface{}]interface{}, logLevelKey stri
 		}
 	}
 
-	return "", fmt.Errorf("failed to find key %s specified by log_level_key option in log record: %v", logLevelKey, record)
+	return "", fmt.Errorf("failed to find key '%s' specified by log_level_key option in log record: %v", logLevelKey, record)
 }
 
 func (e *Event) PopMessageKey(record map[interface{}]interface{}, messageKey string) (string, error) {
@@ -63,5 +63,5 @@ func (e *Event) PopMessageKey(record map[interface{}]interface{}, messageKey str
 		}
 	}
 
-	return "", fmt.Errorf("failed to find key %s specified by log_level_key option in log record: %v", messageKey, record)
+	return "", fmt.Errorf("failed to find key '%s; specified by message_key option in log record: %v", messageKey, record)
 }

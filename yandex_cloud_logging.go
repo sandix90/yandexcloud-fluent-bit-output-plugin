@@ -2,6 +2,7 @@ package main
 
 import (
 	"C"
+	"context"
 	"fmt"
 	fluentbit "github.com/fluent/fluent-bit-go/output"
 	log "github.com/sirupsen/logrus"
@@ -41,7 +42,7 @@ func addPluginInstance(ctx unsafe.Pointer) error {
 		return err
 	}
 
-	logSender, err := plugin.NewGRPCLogSender(config)
+	logSender, err := plugin.NewGRPCLogSender(context.Background(), config)
 	if err != nil {
 		return fmt.Errorf("log sender configuration error")
 	}

@@ -2,21 +2,25 @@ package plugin
 
 import (
 	"context"
-	"crypto/rsa"
-	"github.com/dgrijalva/jwt-go"
+	"encoding/json"
 	"github.com/golang/protobuf/ptypes/timestamp"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"github.com/yandex-cloud/go-genproto/yandex/cloud/logging/v1"
+	ycsdk "github.com/yandex-cloud/go-sdk"
+	"github.com/yandex-cloud/go-sdk/iamkey"
 	"google.golang.org/grpc"
-	grpcMetadata "google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/types/known/structpb"
-	"io"
 	"io/ioutil"
-	"os"
 	"time"
 	"yandex_logging/plugin/dto"
 )
+
+type iamKey struct {
+	ServiceAccountID string `json:"service_account_id"`
+	ID               string `json:"id"`
+	PrivateKey       string `json:"private_key"`
+}
 
 type grpcLogSender struct {
 	config           OutputPluginConfig
@@ -24,22 +28,51 @@ type grpcLogSender struct {
 	authToken        authToken
 	tokenLifetime    time.Duration
 	requestTimeout   time.Duration
-	ingestionClient  logging.LogIngestionServiceClient
+	parentCtx        context.Context
+	sdk              *ycsdk.SDK
 }
 
-func NewGRPCLogSender(config OutputPluginConfig) (*grpcLogSender, error) {
-	conn, err := grpc.Dial(config.EndpointUrl, grpc.WithInsecure(), grpc.WithBlock())
+func NewGRPCLogSender(ctx context.Context, config OutputPluginConfig) (*grpcLogSender, error) {
+
+	privateBuffer, err := ioutil.ReadFile(config.PrivateKeyFilePath)
 	if err != nil {
-		return nil, errors.Wrapf(err, "grpc connect failed")
+		return nil, err
 	}
-	defer conn.Close()
-	c := logging.NewLogIngestionServiceClient(conn)
+
+	ikey := &iamKey{
+		ServiceAccountID: config.ServiceAccountID,
+		ID:               config.KeyID,
+		PrivateKey:       string(privateBuffer),
+	}
+
+	iKeyBytes, err := json.Marshal(ikey)
+	if err != nil {
+		return nil, err
+	}
+
+	k, err := iamkey.ReadFromJSONBytes(iKeyBytes)
+	if err != nil {
+		return nil, err
+	}
+
+	creds, err := ycsdk.ServiceAccountKey(k)
+	if err != nil {
+		return nil, err
+	}
+
+	sdk, err := ycsdk.Build(ctx, ycsdk.Config{
+		Credentials: creds,
+	})
+	if err != nil {
+		return nil, err
+	}
 
 	sender := &grpcLogSender{
-		config:          config,
-		tokenLifetime:   time.Minute * 5,
-		requestTimeout:  time.Second * 5,
-		ingestionClient: c,
+		config:         config,
+		tokenLifetime:  time.Minute * 5,
+		requestTimeout: time.Second * 5,
+		parentCtx:      ctx,
+		sdk:            sdk,
 	}
 	sender.doRequestHandler = sender.doRequest
 	return sender, nil
@@ -110,7 +143,7 @@ func (g *grpcLogSender) doRequest(reqModel *dto.YCLogRecordRequestModel) error {
 			continue
 		}
 		we := &logging.IncomingLogEntry{
-			Timestamp:   &timestamp.Timestamp{Seconds: int64(e.Timestamp.Second())},
+			Timestamp:   &timestamp.Timestamp{Seconds: e.Timestamp.Unix()},
 			Level:       logging.LogLevel_Level(logging.LogLevel_Level_value[e.Level]),
 			Message:     e.Message,
 			JsonPayload: nStruct,
@@ -120,16 +153,9 @@ func (g *grpcLogSender) doRequest(reqModel *dto.YCLogRecordRequestModel) error {
 	}
 	wr.SetEntries(wEntries)
 
-	token, err := g.getToken()
-	if err != nil {
-		return err
-	}
-
-	ctx, cancelFn := context.WithTimeout(context.Background(), 5*time.Second)
-	ctx = grpcMetadata.AppendToOutgoingContext(ctx, "authorization", "Bearer "+token)
+	ctx, cancelFn := context.WithTimeout(g.parentCtx, g.requestTimeout)
 	defer cancelFn()
-
-	response, err := g.ingestionClient.Write(ctx, &wr, nil)
+	response, err := g.sdk.LogIngestion().LogIngestion().Write(ctx, &wr, grpc.EmptyCallOption{})
 	if err != nil {
 		return err
 	}
@@ -138,61 +164,7 @@ func (g *grpcLogSender) doRequest(reqModel *dto.YCLogRecordRequestModel) error {
 }
 
 func (g *grpcLogSender) getToken() (string, error) {
-	if g.authToken.expiresAt.Before(time.Now()) {
-		authToken, err := g.createToken()
-		if err != nil {
-			return "", err
-		}
-		return authToken.token, nil
-	}
-	return g.authToken.token, nil
-}
-
-func (g *grpcLogSender) createToken() (authToken, error) {
-
-	issuedAt := time.Now()
-	expiresAt := issuedAt.Add(g.tokenLifetime)
-	token := jwt.NewWithClaims(ps256WithSaltLengthEqualsHash, jwt.StandardClaims{
-		Issuer:    g.config.ServiceAccountID,
-		IssuedAt:  issuedAt.Unix(),
-		ExpiresAt: expiresAt.Unix(),
-		Audience:  "https://iam.api.cloud.yandex.net/iam/v1/tokens",
-	})
-	token.Header["kid"] = g.config.KeyID
-
-	f, err := os.OpenFile(g.config.PrivateKeyFilePath, os.O_RDONLY, os.ModePerm)
-	if err != nil {
-		return authToken{}, err
-	}
-	defer f.Close()
-
-	privateKey, err := g.loadPrivateKey(f)
-	if err != nil {
-		return authToken{}, err
-	}
-	signed, err := token.SignedString(privateKey)
-	if err != nil {
-		return authToken{}, err
-	}
-
-	g.authToken = authToken{
-		token:     signed,
-		expiresAt: expiresAt,
-	}
-	return g.authToken, nil
-}
-
-func (g *grpcLogSender) loadPrivateKey(r io.Reader) (*rsa.PrivateKey, error) {
-
-	data, err := ioutil.ReadAll(r)
-	if err != nil {
-		return nil, err
-	}
-	rsaPrivateKey, err := jwt.ParseRSAPrivateKeyFromPEM(data)
-	if err != nil {
-		return nil, err
-	}
-	return rsaPrivateKey, nil
+	return "", nil
 }
 
 func (g *grpcLogSender) convertMap(m map[interface{}]interface{}) map[string]interface{} {
